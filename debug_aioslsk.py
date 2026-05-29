@@ -40,9 +40,9 @@ def load_credentials():
         return username, password
 
 
-QUERY        = "Silver Panda acid"
-WAIT_AFTER_CONNECT = 5
-WAIT_SECONDS = 40
+QUERY        = "Daft Punk Get Lucky"   # track très commun pour tester le mécanisme
+WAIT_AFTER_CONNECT = 15   # laisser le réseau distribué s'établir
+WAIT_SECONDS = 60
 
 # Logs aioslsk — commenter pour réduire le bruit
 import logging
