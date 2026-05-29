@@ -48,12 +48,13 @@ WAIT_SECONDS = 40         # Soulseek est lent sur une connexion fraîche
 async def main():
     username, password = load_credentials()
 
-    # Ports différents de dekkr-slsk.exe (60000/60001) pour coexister
-    # obfuscate=True : aide à passer les firewalls (connexions chiffrées)
+    # Port 60000 = port par défaut Soulseek, déjà autorisé par Windows Firewall
+    # si dekkr-slsk.exe a tourné une fois (popup "Autoriser cette app")
+    # IMPORTANT : fermer dekkr-slsk.exe avant de lancer ce script
     settings = Settings(
         credentials=CredentialsSettings(username=username, password=password),
         network=NetworkSettings(
-            listening=ListeningSettings(port=61000, obfuscated_port=61001),
+            listening=ListeningSettings(port=60000, obfuscated_port=60001),
             peer=PeerSettings(obfuscate=True),
         ),
     )
