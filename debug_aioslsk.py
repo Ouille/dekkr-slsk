@@ -40,9 +40,21 @@ def load_credentials():
         return username, password
 
 
-QUERY        = "Silver Panda acid"   # query courte = plus de résultats
-WAIT_AFTER_CONNECT = 5    # laisser la connexion P2P s'établir
-WAIT_SECONDS = 40         # Soulseek est lent sur une connexion fraîche
+QUERY        = "Silver Panda acid"
+WAIT_AFTER_CONNECT = 5
+WAIT_SECONDS = 40
+
+# Logs aioslsk — commenter pour réduire le bruit
+import logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+# Réduire le bruit des modules verbeux
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+logging.getLogger("aioslsk.network.connection").setLevel(logging.INFO)
+logging.getLogger("aioslsk.protocol").setLevel(logging.WARNING)
 
 
 async def main():
