@@ -165,7 +165,7 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
         _update(job, JobStatus.DOWNLOADING)
 
         try:
-            file_path = await _dl.download(client, candidate, cfg.download_folder)
+            file_path = await _dl.download(client, candidate)
         except Exception as e:
             continue  # essayer le candidat suivant
 

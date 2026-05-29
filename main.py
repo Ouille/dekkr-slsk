@@ -45,7 +45,7 @@ async def _async_main(cfg, tray_ref: list) -> None:
 
     # Connexion Soulseek
     try:
-        client = await slsk_session.connect(cfg.soulseek_username, cfg.soulseek_password)
+        client = await slsk_session.connect(cfg.soulseek_username, cfg.soulseek_password, cfg.download_folder)
         _server.set_connected(True)
     except Exception as e:
         _server.set_connected(False)

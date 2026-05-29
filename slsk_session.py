@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from aioslsk.client import SoulSeekClient
-from aioslsk.settings import Settings, CredentialsSettings
+from aioslsk.settings import Settings, CredentialsSettings, SharesSettings
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,12 @@ def is_connected() -> bool:
     return _connected
 
 
-async def connect(username: str, password: str) -> SoulSeekClient:
+async def connect(username: str, password: str, download_folder: str) -> SoulSeekClient:
     """Crée et connecte le client Soulseek. Retourne le client."""
     global _client
     settings = Settings(
-        credentials=CredentialsSettings(username=username, password=password)
+        credentials=CredentialsSettings(username=username, password=password),
+        shares=SharesSettings(download=download_folder),
     )
     _client = SoulSeekClient(settings)
     await _client.start()

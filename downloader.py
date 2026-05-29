@@ -1,49 +1,51 @@
 """
 Téléchargement d'un fichier depuis un peer Soulseek via aioslsk.
 
-Le client est partagé (voir slsk_session.py).
+API aioslsk 1.6.x (vérifiée) :
+  client.transfers.download(username, remote_path) -> Transfer
+  transfer.is_finalized()    -> True quand COMPLETE / ABORTED / FAILED
+  transfer.state.VALUE       -> TransferState enum
+  transfer.local_path        -> chemin local (défini après démarrage)
 
-API aioslsk 1.6.x :
-  transfer = await client.transfers.download(username, remote_path, local_path)
-  # transfer.is_complete() -> bool
-  # transfer.is_failed()   -> bool
-  # transfer.state         -> état textuel
+Le dossier de destination est configuré via settings.shares.download
+dans slsk_session.connect().
 """
 
 import asyncio
 import os
 
+from aioslsk.transfer.model import TransferState
+
 from searcher import SearchCandidate
 
-POLL_INTERVAL    = 0.5   # secondes entre vérifications de progression
-DOWNLOAD_TIMEOUT = 300   # 5 min max par téléchargement
+POLL_INTERVAL    = 1.0    # secondes entre vérifications
+DOWNLOAD_TIMEOUT = 300    # 5 min max
 
 
-async def download(client, candidate: SearchCandidate, download_folder: str) -> str:
+async def download(client, candidate: SearchCandidate) -> str:
     """
-    Télécharge `candidate` vers `download_folder`.
-    Retourne le chemin local du fichier téléchargé.
+    Lance le téléchargement de `candidate` via le client aioslsk.
+    Le dossier de destination est celui configuré dans settings.shares.download.
+    Retourne le chemin local absolu du fichier téléchargé.
     Lève RuntimeError si le téléchargement échoue ou dépasse le timeout.
     """
-    os.makedirs(download_folder, exist_ok=True)
-    local_path = os.path.join(download_folder, candidate.filename)
-
     transfer = await client.transfers.download(
         candidate.username,
         candidate.remote_path,
-        local_path,
     )
 
     elapsed = 0.0
-    while not transfer.is_complete():
+    while not transfer.is_finalized():
         await asyncio.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
-        if transfer.is_failed():
-            raise RuntimeError(f"Téléchargement échoué : {transfer.state}")
         if elapsed > DOWNLOAD_TIMEOUT:
             raise RuntimeError("Timeout téléchargement (5 min)")
 
-    if not os.path.exists(local_path):
+    if transfer.state.VALUE != TransferState.COMPLETE:
+        raise RuntimeError(f"Téléchargement échoué : {transfer.state.VALUE}")
+
+    local_path = transfer.local_path
+    if not local_path or not os.path.exists(local_path):
         raise RuntimeError("Fichier introuvable après téléchargement")
 
     return local_path
@@ -51,7 +53,7 @@ async def download(client, candidate: SearchCandidate, download_folder: str) -> 
 
 def delete_file(path: str) -> None:
     try:
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             os.remove(path)
     except OSError:
         pass
