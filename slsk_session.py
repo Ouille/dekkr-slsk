@@ -49,6 +49,7 @@ async def connect(username: str, password: str) -> SoulSeekClient:
     )
     _client = SoulSeekClient(settings)
     await _client.start()
+    await _client.login()
     _notify(True)
     return _client
 
@@ -72,6 +73,7 @@ async def test_connection(username: str, password: str) -> tuple[bool, str]:
         )
         client = SoulSeekClient(settings)
         await client.start()
+        await client.login()
         await client.stop()
         return True, "Connexion réussie"
     except Exception as e:

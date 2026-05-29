@@ -82,7 +82,8 @@ async def main():
     client.events.register(SearchResultEvent, on_search_result)
 
     await client.start()
-    print(f"✅ Connecté — attente {WAIT_AFTER_CONNECT}s pour stabiliser la connexion P2P…")
+    await client.login()
+    print(f"✅ Connecté et authentifié — attente {WAIT_AFTER_CONNECT}s pour stabiliser la connexion P2P…")
     await asyncio.sleep(WAIT_AFTER_CONNECT)
 
     print(f"\n🔍 Recherche : '{QUERY}' (attente {WAIT_SECONDS}s)…")
