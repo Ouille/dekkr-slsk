@@ -39,8 +39,9 @@ def load_credentials():
         return username, password
 
 
-QUERY        = "Silver Panda We call this acid"
-WAIT_SECONDS = 15
+QUERY        = "Silver Panda acid"   # query courte = plus de résultats
+WAIT_AFTER_CONNECT = 5    # laisser la connexion P2P s'établir
+WAIT_SECONDS = 40         # Soulseek est lent sur une connexion fraîche
 
 
 async def main():
@@ -57,11 +58,16 @@ async def main():
     print(f"\n🔌 Connexion à Soulseek…")
     client = SoulSeekClient(settings)
     await client.start()
-    print("✅ Connecté")
+    print(f"✅ Connecté — attente {WAIT_AFTER_CONNECT}s pour stabiliser la connexion P2P…")
+    await asyncio.sleep(WAIT_AFTER_CONNECT)
 
-    print(f"\n🔍 Recherche : '{QUERY}' ({WAIT_SECONDS}s d'attente)…")
+    print(f"\n🔍 Recherche : '{QUERY}' (attente {WAIT_SECONDS}s)…")
     request = await client.searches.search(QUERY)
-    await asyncio.sleep(WAIT_SECONDS)
+
+    # Afficher la progression toutes les 5s
+    for i in range(0, WAIT_SECONDS, 5):
+        await asyncio.sleep(5)
+        print(f"   [{i+5}s] résultats reçus : {len(getattr(request, 'results', []))}")
 
     results = getattr(request, "results", [])
     print(f"\n📦 Résultats bruts : {len(results)} peers")
