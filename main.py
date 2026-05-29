@@ -20,7 +20,7 @@ import queue_manager
 import server as _server
 import slsk_session
 from tray import TrayIcon
-from windows import open_setup_window, open_status_window, open_settings_window
+from windows import open_setup_window, open_status_window, open_settings_window, start_tk_thread
 
 VERSION = "1.0.0"
 
@@ -83,6 +83,9 @@ async def _async_main(cfg, tray_ref: list) -> None:
 
 def main() -> None:
     cfg = load_config()
+
+    # Démarrer le thread tkinter dédié (doit précéder toute ouverture de fenêtre)
+    start_tk_thread()
 
     if cfg.autostart:
         set_autostart(True)
