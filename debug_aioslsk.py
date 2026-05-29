@@ -40,21 +40,12 @@ def load_credentials():
         return username, password
 
 
-QUERY        = "Daft Punk Get Lucky"   # track très commun pour tester le mécanisme
-WAIT_AFTER_CONNECT = 15   # laisser le réseau distribué s'établir
-WAIT_SECONDS = 60
+QUERY        = "Silver Panda We call this acid"
+WAIT_AFTER_CONNECT = 5
+WAIT_SECONDS = 15
 
-# Logs aioslsk — commenter pour réduire le bruit
 import logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    handlers=[logging.StreamHandler()]
-)
-# Réduire le bruit des modules verbeux
-logging.getLogger("asyncio").setLevel(logging.WARNING)
-logging.getLogger("aioslsk.network.connection").setLevel(logging.INFO)
-logging.getLogger("aioslsk.protocol").setLevel(logging.WARNING)
+logging.basicConfig(level=logging.WARNING)  # silencieux
 
 
 async def main():
