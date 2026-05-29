@@ -14,7 +14,7 @@ import sys
 
 try:
     from aioslsk.client import SoulSeekClient
-    from aioslsk.settings import Settings, CredentialsSettings
+    from aioslsk.settings import Settings, CredentialsSettings, NetworkSettings, ListeningSettings
 except ImportError:
     print("❌ aioslsk non installé — pip install aioslsk")
     sys.exit(1)
@@ -46,8 +46,12 @@ WAIT_SECONDS = 15
 async def main():
     username, password = load_credentials()
 
+    # Ports différents de dekkr-slsk.exe (60000/60001) pour coexister
     settings = Settings(
-        credentials=CredentialsSettings(username=username, password=password)
+        credentials=CredentialsSettings(username=username, password=password),
+        network=NetworkSettings(
+            listening=ListeningSettings(port=61000, obfuscated_port=61001)
+        ),
     )
 
     print(f"\n🔌 Connexion à Soulseek…")
