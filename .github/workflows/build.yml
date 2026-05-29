@@ -1,0 +1,70 @@
+name: Build .exe
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build .exe with PyInstaller
+        run: pyinstaller build.spec
+
+      - name: Verify .exe exists
+        run: |
+          if (!(Test-Path "dist\dekkr-slsk.exe")) {
+            Write-Error "Build failed: .exe not found"
+            exit 1
+          }
+          Write-Output "Build OK: $(Get-Item 'dist\dekkr-slsk.exe' | Select-Object -ExpandProperty Length) bytes"
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dekkr-slsk
+          path: dist/dekkr-slsk.exe
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dekkr-slsk.exe
+          name: "dekkr-slsk ${{ github.ref_name }}"
+          body: |
+            ## Installation
+
+            1. Téléchargez `dekkr-slsk.exe`
+            2. Double-cliquez pour lancer (aucune installation requise)
+            3. Entrez vos identifiants Soulseek et choisissez un dossier de téléchargement
+            4. Une icône verte apparaît dans la barre système
+
+            Vous avez besoin d'un compte Soulseek gratuit : http://www.soulseeknet.org/
+
+            **Note légale :** L'usage de musique protégée est sous la responsabilité de l'utilisateur.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
