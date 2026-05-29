@@ -14,7 +14,8 @@ import sys
 
 try:
     from aioslsk.client import SoulSeekClient
-    from aioslsk.settings import Settings, CredentialsSettings, NetworkSettings, ListeningSettings
+    from aioslsk.settings import Settings, CredentialsSettings, NetworkSettings, ListeningSettings, PeerSettings
+    from aioslsk.events import SearchResultEvent
 except ImportError:
     print("❌ aioslsk non installé — pip install aioslsk")
     sys.exit(1)
@@ -48,15 +49,25 @@ async def main():
     username, password = load_credentials()
 
     # Ports différents de dekkr-slsk.exe (60000/60001) pour coexister
+    # obfuscate=True : aide à passer les firewalls (connexions chiffrées)
     settings = Settings(
         credentials=CredentialsSettings(username=username, password=password),
         network=NetworkSettings(
-            listening=ListeningSettings(port=61000, obfuscated_port=61001)
+            listening=ListeningSettings(port=61000, obfuscated_port=61001),
+            peer=PeerSettings(obfuscate=True),
         ),
     )
 
     print(f"\n🔌 Connexion à Soulseek…")
     client = SoulSeekClient(settings)
+
+    # Compteur de résultats via événements (indépendant du polling)
+    event_results = []
+    async def on_search_result(event: SearchResultEvent):
+        event_results.append(event.result)
+
+    client.events.register(SearchResultEvent, on_search_result)
+
     await client.start()
     print(f"✅ Connecté — attente {WAIT_AFTER_CONNECT}s pour stabiliser la connexion P2P…")
     await asyncio.sleep(WAIT_AFTER_CONNECT)
@@ -64,20 +75,25 @@ async def main():
     print(f"\n🔍 Recherche : '{QUERY}' (attente {WAIT_SECONDS}s)…")
     request = await client.searches.search(QUERY)
 
-    # Afficher la progression toutes les 5s
+    # Afficher la progression toutes les 5s (via events ET via request.results)
     for i in range(0, WAIT_SECONDS, 5):
         await asyncio.sleep(5)
-        print(f"   [{i+5}s] résultats reçus : {len(getattr(request, 'results', []))}")
+        print(f"   [{i+5}s] résultats polling={len(getattr(request, 'results', []))}  events={len(event_results)}")
 
+    # Fusionner résultats polling + events
     results = getattr(request, "results", [])
-    print(f"\n📦 Résultats bruts : {len(results)} peers")
+    all_results = results if results else event_results
+    print(f"\n📦 Résultats : {len(results)} via polling / {len(event_results)} via events")
 
-    if not results:
-        print("⚠️  Aucun résultat — vérifier connexion ou query")
-        # Dump l'objet request pour voir ses attributs
-        print(f"\nattributs de request : {[a for a in dir(request) if not a.startswith('_')]}")
+    if not all_results:
+        print("⚠️  Aucun résultat reçu")
+        print(f"   attributs de request : {[a for a in dir(request) if not a.startswith('_')]}")
+        print("   → Vérifier : firewall Windows autorise les connexions entrantes sur port 61000 ?")
+        print("   → Ou relancer avec dekkr-slsk.exe fermé sur port 60000")
         await client.stop()
         return
+
+    results = all_results
 
     # Dump le premier résultat en détail
     first = results[0]
