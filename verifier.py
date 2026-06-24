@@ -1,35 +1,20 @@
 """
-Verification post-téléchargement.
+Verification post-téléchargement via métadonnées du fichier (mutagen).
 
-Chaîne d'analyse :
-  1. Bridge local localhost:7430 (dekkr-essentia-bridge)
-  2. Backend cloud Render (si configuré)
-  3. Aucun disponible → raise AnalyzerUnavailable
-
-La vérification BPM/durée est toujours effectuée —
-aucun double-check n'est nécessaire, librosa et essentia sont fiables à ±2 BPM.
+- Durée    : lue depuis les headers audio — fiable sur MP3/FLAC/WAV.
+- BPM      : lu depuis le tag TBPM (MP3) ou BPM (FLAC/OGG) si présent ;
+             si absent, la vérif BPM est sautée (DekkR/Meyda l'établira à l'import).
+- Tonalité : non vérifiée ici.
 """
 
-import asyncio
-import os
 from dataclasses import dataclass
-from enum import Enum
 from typing import Optional
 
-import aiohttp
-
-LOCAL_ANALYZER_URL = "http://localhost:7430"
-LOCAL_HEALTH_TIMEOUT = 0.5   # 500ms — réponse locale < 10ms normalement
-ANALYZE_TIMEOUT     = 120.0  # 2 min max pour l'analyse
+import mutagen
 
 
 class AnalyzerUnavailable(Exception):
-    pass
-
-
-class AnalyzerSource(Enum):
-    LOCAL = "local"
-    CLOUD = "cloud"
+    """Gardé pour compatibilité — non levé dans cette implémentation."""
 
 
 @dataclass
@@ -39,38 +24,28 @@ class VerifyResult:
     bpm: Optional[float] = None
     duration: Optional[float] = None
     key: Optional[str] = None
-    source: Optional[AnalyzerSource] = None
+    source: str = "tags"
 
 
-async def _check_local() -> bool:
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                f"{LOCAL_ANALYZER_URL}/health",
-                timeout=aiohttp.ClientTimeout(total=LOCAL_HEALTH_TIMEOUT),
-            ) as r:
-                return r.status == 200
-    except Exception:
-        return False
-
-
-async def _analyze_at(url: str, file_path: str, api_key: str = "") -> Optional[dict]:
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    try:
-        async with aiohttp.ClientSession() as s:
-            with open(file_path, "rb") as f:
-                form = aiohttp.FormData()
-                form.add_field("file", f, filename=os.path.basename(file_path))
-                async with s.post(
-                    f"{url}/analyze",
-                    data=form,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=ANALYZE_TIMEOUT),
-                ) as r:
-                    if r.status == 200:
-                        return await r.json()
-    except Exception:
-        pass
+def _read_bpm_tag(audio) -> Optional[float]:
+    tags = audio.tags
+    if tags is None:
+        return None
+    # MP3 ID3 : TBPM
+    if "TBPM" in tags:
+        try:
+            return float(str(tags["TBPM"]))
+        except (ValueError, TypeError):
+            pass
+    # FLAC / OGG Vorbis / générique
+    for key in ("bpm", "BPM"):
+        val = tags.get(key)
+        if val:
+            try:
+                raw = val[0] if isinstance(val, list) else str(val)
+                return float(raw)
+            except (ValueError, TypeError):
+                pass
     return None
 
 
@@ -82,36 +57,16 @@ async def analyze_and_verify(
     cloud_url: str = "",
     cloud_key: str = "",
 ) -> VerifyResult:
-    """
-    Analyse le fichier et vérifie BPM/durée.
-    Lève AnalyzerUnavailable si aucun analyzer n'est joignable.
-    """
-    analysis = None
-    source = None
+    try:
+        audio = mutagen.File(file_path)
+    except Exception as e:
+        return VerifyResult(ok=False, reason=f"Fichier illisible : {e}")
 
-    if await _check_local():
-        analysis = await _analyze_at(LOCAL_ANALYZER_URL, file_path)
-        source = AnalyzerSource.LOCAL
+    if audio is None or audio.info is None:
+        return VerifyResult(ok=False, reason="Format audio non reconnu")
 
-    if analysis is None and cloud_url:
-        analysis = await _analyze_at(cloud_url, file_path, cloud_key)
-        source = AnalyzerSource.CLOUD
-
-    if analysis is None:
-        raise AnalyzerUnavailable("Aucun analyzer disponible (localhost:7430 injoignable, cloud non configuré)")
-
-    got_bpm      = analysis.get("bpm") or 0.0
-    got_duration = analysis.get("duration") or 0.0
-    got_key      = analysis.get("key") or ""
-
-    # Vérification BPM (bloquante)
-    if expected_bpm and expected_bpm > 0 and got_bpm > 0:
-        if abs(got_bpm - expected_bpm) > bpm_threshold:
-            return VerifyResult(
-                ok=False,
-                reason=f"BPM: attendu {expected_bpm:.1f}, obtenu {got_bpm:.2f} (seuil ±{bpm_threshold})",
-                bpm=got_bpm, duration=got_duration, key=got_key, source=source,
-            )
+    got_duration = audio.info.length
+    got_bpm = _read_bpm_tag(audio)
 
     # Vérification durée (bloquante)
     if expected_duration and expected_duration > 0 and got_duration > 0:
@@ -119,10 +74,18 @@ async def analyze_and_verify(
             return VerifyResult(
                 ok=False,
                 reason=f"Durée: attendu {expected_duration:.0f}s, obtenu {got_duration:.0f}s (seuil ±15s)",
-                bpm=got_bpm, duration=got_duration, key=got_key, source=source,
+                bpm=got_bpm,
+                duration=got_duration,
             )
 
-    return VerifyResult(
-        ok=True, reason="ok",
-        bpm=got_bpm, duration=got_duration, key=got_key, source=source,
-    )
+    # Vérification BPM — seulement si le tag est présent dans le fichier
+    if expected_bpm and expected_bpm > 0 and got_bpm and got_bpm > 0:
+        if abs(got_bpm - expected_bpm) > bpm_threshold:
+            return VerifyResult(
+                ok=False,
+                reason=f"BPM: attendu {expected_bpm:.1f}, obtenu {got_bpm:.2f} (seuil ±{bpm_threshold})",
+                bpm=got_bpm,
+                duration=got_duration,
+            )
+
+    return VerifyResult(ok=True, reason="ok", bpm=got_bpm, duration=got_duration)

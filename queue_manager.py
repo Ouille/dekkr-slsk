@@ -196,7 +196,7 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
                         "bpm":      result.bpm,
                         "duration": result.duration,
                         "key":      result.key,
-                        "engine":   result.source.value if result.source else None,
+                        "engine":   result.source if result.source else None,
                     })
             return
         else:
