@@ -17,6 +17,7 @@ import os
 from aioslsk.transfer.model import TransferState
 
 from searcher import SearchCandidate
+import textutil
 
 POLL_INTERVAL    = 1.0    # secondes entre vérifications
 DOWNLOAD_TIMEOUT = 300    # 5 min max
@@ -49,6 +50,41 @@ async def download(client, candidate: SearchCandidate) -> str:
         raise RuntimeError("Fichier introuvable après téléchargement")
 
     return local_path
+
+
+def _unique_path(path: str) -> str:
+    """Si `path` existe déjà, ajoute un suffixe ' (2)', ' (3)'... pour ne pas écraser."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    i = 2
+    while os.path.exists(f"{base} ({i}){ext}"):
+        i += 1
+    return f"{base} ({i}){ext}"
+
+
+def rename_to(path: str, artist: str, title: str) -> str:
+    """
+    Renomme le fichier téléchargé en « Artiste - Titre.ext ».
+    Le nom sert de clé dans DekkR — on veut un format explicite et stable.
+    Retourne le nouveau chemin (ou l'ancien en cas d'échec).
+    """
+    if not path or not os.path.exists(path):
+        return path
+    folder = os.path.dirname(path)
+    ext = os.path.splitext(path)[1].lower()
+    new_name = textutil.safe_filename(artist, title, ext)
+    new_path = os.path.join(folder, new_name)
+
+    if os.path.abspath(new_path) == os.path.abspath(path):
+        return path  # déjà au bon nom
+
+    new_path = _unique_path(new_path)
+    try:
+        os.replace(path, new_path)
+        return new_path
+    except OSError:
+        return path  # on garde le fichier d'origine si le renommage échoue
 
 
 def delete_file(path: str) -> None:

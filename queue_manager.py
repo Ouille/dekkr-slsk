@@ -198,6 +198,9 @@ async def _run(job: Job) -> None:
             history.log(cfg, job, "echec_download", candidate=candidate, verification=str(e))
             continue  # essayer le candidat suivant
 
+        # Renommage « Artiste - Titre.ext » (nom = clé dans DekkR)
+        file_path = _dl.rename_to(file_path, job.artist, job.title)
+
         # Lecture des métadonnées réelles (durée fiable) — sans jugement
         meta = read_metadata(file_path)
         _update(job, JobStatus.DONE,

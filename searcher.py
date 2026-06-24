@@ -20,6 +20,8 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+import textutil
+
 SEARCH_TIMEOUT_S = 15
 MAX_CANDIDATES   = 5
 
@@ -81,7 +83,7 @@ async def search(
     Lance une recherche aioslsk et retourne les candidats scorés (meilleur en premier).
     `client` est un SoulSeekClient déjà démarré ET loggué (start() + login()).
     """
-    query = f"{artist} {title}".strip()
+    query = textutil.clean_for_search(artist, title)
     accepted = {f.lower() for f in accepted_formats}
 
     request = await client.searches.search(query)
