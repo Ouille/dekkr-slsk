@@ -154,9 +154,14 @@ async def _process_job(job: Job) -> None:
 
 
 async def _run(job: Job) -> None:
+    """
+    Télécharge le meilleur candidat texte et journalise les faits.
+    AUCUNE vérification BPM/durée : dekkr-slsk est un téléchargeur honnête,
+    le jugement "bon track ?" se fait via le journal + l'écoute (ou DekkR/Meyda).
+    """
     import searcher as _searcher
     import downloader as _dl
-    from verifier import analyze_and_verify, AnalyzerUnavailable
+    from verifier import read_metadata
     cfg = _cfg
 
     _update(job, JobStatus.SEARCHING)
@@ -193,46 +198,24 @@ async def _run(job: Job) -> None:
             history.log(cfg, job, "echec_download", candidate=candidate, verification=str(e))
             continue  # essayer le candidat suivant
 
-        _update(job, JobStatus.VERIFYING)
+        # Lecture des métadonnées réelles (durée fiable) — sans jugement
+        meta = read_metadata(file_path)
+        _update(job, JobStatus.DONE,
+                file_path=file_path,
+                analysis={
+                    "bpm":      meta.get("bpm"),
+                    "duration": meta.get("duration"),
+                    "key":      meta.get("key"),
+                    "engine":   "tags",
+                })
+        history.log(cfg, job, "telecharge", candidate=candidate, meta=meta,
+                    verification="non verifie")
+        return
 
-        try:
-            result = await analyze_and_verify(
-                file_path         = file_path,
-                expected_bpm      = job.bpm,
-                expected_duration = job.duration,
-                bpm_threshold     = cfg.bpm_threshold,
-                cloud_url         = cfg.analyzer_cloud_url,
-                cloud_key         = cfg.analyzer_cloud_key,
-            )
-        except AnalyzerUnavailable:
-            _update(job, JobStatus.QUEUED,
-                    file_path=file_path,
-                    error="analyzer_unavailable",
-                    retry_at=datetime.now() + timedelta(minutes=5))
-            history.log(cfg, job, "analyzer_indispo", candidate=candidate)
-            _schedule_retry(job, 5 * 60)
-            return
-
-        if result.ok:
-            _update(job, JobStatus.DONE,
-                    file_path=file_path,
-                    analysis={
-                        "bpm":      result.bpm,
-                        "duration": result.duration,
-                        "key":      result.key,
-                        "engine":   result.source if result.source else None,
-                    })
-            history.log(cfg, job, "done", candidate=candidate, result=result, verification="OK")
-            return
-        else:
-            history.log(cfg, job, "rejet_verification", candidate=candidate, result=result,
-                        verification=result.reason)
-            _dl.delete_file(file_path)
-            # Essayer le candidat suivant
-
-    # Tous les candidats épuisés
+    # Tous les candidats ont échoué au téléchargement
     _update(job, JobStatus.QUEUED,
-            error="all_candidates_failed",
+            error="all_downloads_failed",
             retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
-    history.log(cfg, job, "tous_candidats_echoues", verification=f"{job.attempts} candidat(s) rejete(s)")
+    history.log(cfg, job, "echec_tous_telechargements",
+                verification=f"{job.attempts} tentative(s) echouee(s)")
     _schedule_retry(job, cfg.retry_delay_minutes * 60)

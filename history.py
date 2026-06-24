@@ -55,8 +55,13 @@ def _fmt(val, spec=None) -> str:
     return str(val)
 
 
-def log(cfg, job, statut: str, candidate=None, result=None, verification: str = "") -> None:
-    """Ajoute une ligne au journal. Ne lève jamais (échec silencieux)."""
+def log(cfg, job, statut: str, candidate=None, meta=None, verification: str = "") -> None:
+    """Ajoute une ligne au journal. Ne lève jamais (échec silencieux).
+
+    `meta` est le dict renvoyé par verifier.read_metadata (duration/bpm/key
+    lus dans le fichier téléchargé), ou None.
+    """
+    meta = meta or {}
     row = {
         "horodatage":         datetime.now().isoformat(timespec="seconds"),
         "statut":             statut,
@@ -68,15 +73,15 @@ def log(cfg, job, statut: str, candidate=None, result=None, verification: str = 
         "format":             getattr(candidate, "fmt", "") if candidate else "",
         "bitrate_kbps":       _fmt(getattr(candidate, "bitrate", None)) if candidate else "",
         "taille_octets":      _fmt(getattr(candidate, "size", None)) if candidate else "",
-        "bpm_obtenu":         _fmt(getattr(result, "bpm", None), ".2f") if result else "",
-        "duree_obtenue_s":    _fmt(getattr(result, "duration", None), ".0f") if result else "",
-        "key_obtenue":        getattr(result, "key", "") if result else "",
+        "bpm_obtenu":         _fmt(meta.get("bpm"), ".2f"),
+        "duree_obtenue_s":    _fmt(meta.get("duration"), ".0f"),
+        "key_obtenue":        meta.get("key") or "",
         "ecart_bpm":          "",
         "verification":       verification,
     }
 
     job_bpm = getattr(job, "bpm", None)
-    res_bpm = getattr(result, "bpm", None) if result else None
+    res_bpm = meta.get("bpm")
     if job_bpm and res_bpm:
         try:
             row["ecart_bpm"] = format(abs(float(res_bpm) - float(job_bpm)), ".2f")
