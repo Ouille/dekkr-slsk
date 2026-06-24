@@ -58,6 +58,22 @@ _jobs:    dict[str, Job] = {}
 _queue:   asyncio.Queue  = asyncio.Queue()
 _semaphore: Optional[asyncio.Semaphore] = None
 _state_cb: list[Callable] = []
+_retry_tasks: set = set()   # garde une réf sur les tâches de retry (évite le GC)
+
+
+def _schedule_retry(job: Job, delay_seconds: float) -> None:
+    """Re-planifie un job après `delay_seconds` SANS bloquer un worker."""
+    async def _requeue_later():
+        try:
+            await asyncio.sleep(max(0, delay_seconds))
+        except asyncio.CancelledError:
+            return
+        job.retry_at = None
+        _queue.put_nowait(job)
+
+    task = asyncio.create_task(_requeue_later())
+    _retry_tasks.add(task)
+    task.add_done_callback(_retry_tasks.discard)
 
 
 def init(max_workers: int) -> None:
@@ -122,11 +138,6 @@ async def run_worker(client, cfg) -> None:
     while True:
         job = await _queue.get()
 
-        # Retry différé : si retry_at dans le futur, remettre en queue
-        if job.retry_at and datetime.now() < job.retry_at:
-            delay = (job.retry_at - datetime.now()).total_seconds()
-            await asyncio.sleep(max(0, delay))
-
         await _semaphore.acquire()
         try:
             await _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, AnalyzerUnavailable)
@@ -157,7 +168,7 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
         _update(job, JobStatus.QUEUED,
                 error="no_candidate_found",
                 retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
-        _queue.put_nowait(job)
+        _schedule_retry(job, cfg.retry_delay_minutes * 60)
         return
 
     for candidate in candidates:
@@ -186,7 +197,7 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
                     file_path=file_path,
                     error="analyzer_unavailable",
                     retry_at=datetime.now() + timedelta(minutes=5))
-            _queue.put_nowait(job)
+            _schedule_retry(job, 5 * 60)
             return
 
         if result.ok:
@@ -207,4 +218,4 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
     _update(job, JobStatus.QUEUED,
             error="all_candidates_failed",
             retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
-    _queue.put_nowait(job)
+    _schedule_retry(job, cfg.retry_delay_minutes * 60)
