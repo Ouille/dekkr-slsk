@@ -24,6 +24,7 @@ HEADER = [
     "bpm_demande",
     "key_demande",
     "fichier_telecharge",
+    "fichier_renomme",
     "format",
     "bitrate_kbps",
     "taille_octets",
@@ -55,11 +56,12 @@ def _fmt(val, spec=None) -> str:
     return str(val)
 
 
-def log(cfg, job, statut: str, candidate=None, meta=None, verification: str = "") -> None:
+def log(cfg, job, statut: str, candidate=None, meta=None, local_path: str = "",
+        verification: str = "") -> None:
     """Ajoute une ligne au journal. Ne lève jamais (échec silencieux).
 
-    `meta` est le dict renvoyé par verifier.read_metadata (duration/bpm/key
-    lus dans le fichier téléchargé), ou None.
+    `meta`       : dict de verifier.read_metadata (duration/bpm/key du fichier), ou None.
+    `local_path` : chemin du fichier APRÈS renommage (colonne fichier_renomme).
     """
     meta = meta or {}
     row = {
@@ -70,6 +72,7 @@ def log(cfg, job, statut: str, candidate=None, meta=None, verification: str = ""
         "bpm_demande":        _fmt(getattr(job, "bpm", None), ".1f"),
         "key_demande":        getattr(job, "key", "") or "",
         "fichier_telecharge": getattr(candidate, "filename", "") if candidate else "",
+        "fichier_renomme":    os.path.basename(local_path) if local_path else "",
         "format":             getattr(candidate, "fmt", "") if candidate else "",
         "bitrate_kbps":       _fmt(getattr(candidate, "bitrate", None)) if candidate else "",
         "taille_octets":      _fmt(getattr(candidate, "size", None)) if candidate else "",
@@ -89,12 +92,44 @@ def log(cfg, job, statut: str, candidate=None, meta=None, verification: str = ""
             pass
 
     path = _path(cfg)
-    is_new = not os.path.exists(path)
+    write_header = _needs_header(path)
     try:
-        with open(path, "a", newline="", encoding="utf-8-sig") as f:
+        # utf-8-sig (avec BOM) seulement à la création/réinit ; sinon utf-8 pur
+        # pour ne pas insérer de BOM au milieu du fichier en mode append.
+        encoding = "utf-8-sig" if write_header else "utf-8"
+        with open(path, "a", newline="", encoding=encoding) as f:
             writer = csv.DictWriter(f, fieldnames=HEADER)
-            if is_new:
+            if write_header:
                 writer.writeheader()
             writer.writerow(row)
     except OSError:
         pass
+
+
+def _needs_header(path: str) -> bool:
+    """True si le fichier est neuf ou si son en-tête est obsolète.
+
+    Si l'en-tête ne correspond plus (ajout de colonnes), l'ancien journal est
+    archivé en `.old` et un fichier neuf est démarré — évite des colonnes
+    décalées.
+    """
+    if not os.path.exists(path):
+        return True
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            first = f.readline().rstrip("\r\n")
+    except OSError:
+        return False
+    if first == ",".join(HEADER):
+        return False
+    # En-tête obsolète : archiver l'ancien journal
+    try:
+        bak = path + ".old"
+        n = 1
+        while os.path.exists(bak):
+            bak = f"{path}.old{n}"
+            n += 1
+        os.replace(path, bak)
+    except OSError:
+        pass
+    return True

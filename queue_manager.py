@@ -212,7 +212,7 @@ async def _run(job: Job) -> None:
                     "engine":   "tags",
                 })
         history.log(cfg, job, "telecharge", candidate=candidate, meta=meta,
-                    verification="non verifie")
+                    local_path=file_path, verification="non verifie")
         return
 
     # Tous les candidats ont échoué au téléchargement

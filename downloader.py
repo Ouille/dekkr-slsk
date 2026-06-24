@@ -23,12 +23,29 @@ POLL_INTERVAL    = 1.0    # secondes entre vérifications
 DOWNLOAD_TIMEOUT = 300    # 5 min max
 
 
+async def _cleanup_failed(client, transfer) -> None:
+    """Annule le transfert et supprime le fichier partiel laissé sur le disque."""
+    local_path = getattr(transfer, "local_path", None)
+    try:
+        # abort() annule le transfert ET supprime le fichier (cas download)
+        await client.transfers.abort(transfer)
+    except Exception:
+        pass
+    # Filet de sécurité si abort n'a pas supprimé (état déjà finalisé, etc.)
+    if local_path and os.path.exists(local_path):
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
 async def download(client, candidate: SearchCandidate) -> str:
     """
     Lance le téléchargement de `candidate` via le client aioslsk.
     Le dossier de destination est celui configuré dans settings.shares.download.
     Retourne le chemin local absolu du fichier téléchargé.
     Lève RuntimeError si le téléchargement échoue ou dépasse le timeout.
+    En cas d'échec/timeout, le fichier partiel est supprimé.
     """
     transfer = await client.transfers.download(
         candidate.username,
@@ -40,9 +57,11 @@ async def download(client, candidate: SearchCandidate) -> str:
         await asyncio.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
         if elapsed > DOWNLOAD_TIMEOUT:
+            await _cleanup_failed(client, transfer)
             raise RuntimeError("Timeout téléchargement (5 min)")
 
     if transfer.state.VALUE != TransferState.COMPLETE:
+        await _cleanup_failed(client, transfer)
         raise RuntimeError(f"Téléchargement échoué : {transfer.state.VALUE}")
 
     local_path = transfer.local_path
