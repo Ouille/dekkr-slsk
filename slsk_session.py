@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 
 from aioslsk.client import SoulSeekClient
-from aioslsk.settings import Settings, CredentialsSettings, SharesSettings
+from aioslsk.settings import Settings, CredentialsSettings, SharesSettings, NetworkSettings, ListeningSettings, PeerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +47,14 @@ async def connect(username: str, password: str, download_folder: str) -> SoulSee
     settings = Settings(
         credentials=CredentialsSettings(username=username, password=password),
         shares=SharesSettings(download=download_folder),
+        network=NetworkSettings(
+            listening=ListeningSettings(port=60000, obfuscated_port=60001),
+            peer=PeerSettings(obfuscate=True),
+        ),
     )
     _client = SoulSeekClient(settings)
-    await _client.start()
-    await _client.login()
+    await asyncio.wait_for(_client.start(), timeout=15)
+    await asyncio.wait_for(_client.login(), timeout=30)
     _notify(True)
     return _client
 
@@ -70,12 +74,18 @@ async def test_connection(username: str, password: str) -> tuple[bool, str]:
     """Test de connexion pour la fenêtre de setup."""
     try:
         settings = Settings(
-            credentials=CredentialsSettings(username=username, password=password)
+            credentials=CredentialsSettings(username=username, password=password),
+            network=NetworkSettings(
+                listening=ListeningSettings(port=60000, obfuscated_port=60001),
+                peer=PeerSettings(obfuscate=True),
+            ),
         )
         client = SoulSeekClient(settings)
-        await client.start()
-        await client.login()
+        await asyncio.wait_for(client.start(), timeout=15)
+        await asyncio.wait_for(client.login(), timeout=30)
         await client.stop()
         return True, "Connexion réussie"
+    except asyncio.TimeoutError:
+        return False, "Timeout — réseau Soulseek injoignable"
     except Exception as e:
         return False, str(e)
