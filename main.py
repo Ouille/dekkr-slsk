@@ -40,9 +40,7 @@ def _start_server(cfg, loop: asyncio.AbstractEventLoop) -> uvicorn.Server:
 
 
 async def _async_main(cfg, tray_ref: list) -> None:
-    """Boucle asyncio principale : connexion Soulseek + workers."""
-    queue_manager.init(cfg.max_workers)
-
+    """Boucle asyncio principale : connexion Soulseek + traitement des jobs."""
     # Connexion Soulseek
     try:
         client = await slsk_session.connect(cfg.soulseek_username, cfg.soulseek_password, cfg.download_folder)
@@ -55,6 +53,9 @@ async def _async_main(cfg, tray_ref: list) -> None:
         # Attendre une reconnexion manuelle (restart)
         await asyncio.sleep(999_999)
         return
+
+    # Stocke client + config : chaque job lancera sa propre tâche (parallélisme illimité)
+    queue_manager.init(client, cfg)
 
     # Callback état : mise à jour du tray
     def on_state(active: int, waiting: int) -> None:
@@ -69,14 +70,9 @@ async def _async_main(cfg, tray_ref: list) -> None:
 
     _server.register_job_callback(on_job_created)
 
-    # Lancer N workers en parallèle
-    workers = [
-        asyncio.create_task(queue_manager.run_worker(client, cfg))
-        for _ in range(cfg.max_workers)
-    ]
-
+    # Garder la boucle vivante (les jobs tournent dans leurs propres tâches)
     try:
-        await asyncio.gather(*workers)
+        await asyncio.Event().wait()
     except asyncio.CancelledError:
         pass
 

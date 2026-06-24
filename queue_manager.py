@@ -1,10 +1,14 @@
 """
 Gestionnaire de jobs : search → download → verify → done/failed/queued.
 
-Chaque job passe par les états :
+Chaque job lance sa PROPRE tâche asyncio dès sa création (modèle spawn-par-job).
+Le parallélisme est illimité si cfg.max_workers <= 0, sinon plafonné par un
+sémaphore à max_workers jobs simultanés.
+
+États d'un job :
   searching → downloading → verifying → done
-                                      → failed (retry si < MAX_ATTEMPTS)
-                                      → queued (tous candidats épuisés, retry planifié)
+                                      → queued (aucun/tous candidats échoués, retry planifié)
+                                      → failed (erreur de recherche)
 """
 
 import asyncio
@@ -13,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Callable
+
+import history
 
 MAX_ATTEMPTS = 5   # candidats max avant mise en liste d'attente
 
@@ -54,31 +60,21 @@ class Job:
         }
 
 
-_jobs:    dict[str, Job] = {}
-_queue:   asyncio.Queue  = asyncio.Queue()
+_jobs:      dict[str, Job] = {}
+_state_cb:  list[Callable] = []
+_tasks:     set = set()                       # réfs sur les tâches en cours (évite le GC)
 _semaphore: Optional[asyncio.Semaphore] = None
-_state_cb: list[Callable] = []
-_retry_tasks: set = set()   # garde une réf sur les tâches de retry (évite le GC)
+_client = None
+_cfg = None
 
 
-def _schedule_retry(job: Job, delay_seconds: float) -> None:
-    """Re-planifie un job après `delay_seconds` SANS bloquer un worker."""
-    async def _requeue_later():
-        try:
-            await asyncio.sleep(max(0, delay_seconds))
-        except asyncio.CancelledError:
-            return
-        job.retry_at = None
-        _queue.put_nowait(job)
-
-    task = asyncio.create_task(_requeue_later())
-    _retry_tasks.add(task)
-    task.add_done_callback(_retry_tasks.discard)
-
-
-def init(max_workers: int) -> None:
-    global _semaphore
-    _semaphore = asyncio.Semaphore(max_workers)
+def init(client, cfg) -> None:
+    """Stocke le client Soulseek + la config. max_workers<=0 => parallélisme illimité."""
+    global _client, _cfg, _semaphore
+    _client = client
+    _cfg = cfg
+    n = getattr(cfg, "max_workers", 0) or 0
+    _semaphore = asyncio.Semaphore(n) if n > 0 else None
 
 
 def register_state_callback(cb: Callable) -> None:
@@ -95,6 +91,25 @@ def _notify() -> None:
             pass
 
 
+def _spawn(coro) -> None:
+    """Lance une coroutine en tâche de fond avec réf conservée."""
+    task = asyncio.create_task(coro)
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+
+def _schedule_retry(job: Job, delay_seconds: float) -> None:
+    """Re-traite un job après `delay_seconds`, sans bloquer aucune tâche active."""
+    async def _later():
+        try:
+            await asyncio.sleep(max(0, delay_seconds))
+        except asyncio.CancelledError:
+            return
+        job.retry_at = None
+        _spawn(_process_job(job))
+    _spawn(_later())
+
+
 def create_job(artist: str, title: str, bpm: Optional[float], duration: Optional[float], key: Optional[str]) -> Job:
     job = Job(
         job_id   = str(uuid.uuid4()),
@@ -105,7 +120,7 @@ def create_job(artist: str, title: str, bpm: Optional[float], duration: Optional
         key      = key,
     )
     _jobs[job.job_id] = job
-    _queue.put_nowait(job)
+    _spawn(_process_job(job))   # démarre immédiatement, en parallèle
     return job
 
 
@@ -129,45 +144,42 @@ def _update(job: Job, status: JobStatus, **kwargs) -> None:
     _notify()
 
 
-async def run_worker(client, cfg) -> None:
-    """Boucle worker — traite les jobs en continu."""
+async def _process_job(job: Job) -> None:
+    """Traite un job de bout en bout. Respecte le sémaphore si défini."""
+    if _semaphore is not None:
+        async with _semaphore:
+            await _run(job)
+    else:
+        await _run(job)
+
+
+async def _run(job: Job) -> None:
     import searcher as _searcher
     import downloader as _dl
     from verifier import analyze_and_verify, AnalyzerUnavailable
-
-    while True:
-        job = await _queue.get()
-
-        await _semaphore.acquire()
-        try:
-            await _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, AnalyzerUnavailable)
-        finally:
-            _semaphore.release()
-            _queue.task_done()
-
-
-async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, AnalyzerUnavailable) -> None:
-    from verifier import AnalyzerUnavailable as _AU
+    cfg = _cfg
 
     _update(job, JobStatus.SEARCHING)
 
     try:
         candidates = await _searcher.search(
-            client       = client,
-            artist       = job.artist,
-            title        = job.title,
+            client            = _client,
+            artist            = job.artist,
+            title             = job.title,
             expected_duration = job.duration,
             accepted_formats  = cfg.accepted_formats,
             min_quality_kbps  = cfg.min_quality_kbps,
         )
     except Exception as e:
         _update(job, JobStatus.FAILED, error=f"Erreur recherche : {e}")
+        history.log(cfg, job, "erreur_recherche", verification=str(e))
         return
 
     if not candidates:
         _update(job, JobStatus.QUEUED,
                 error="no_candidate_found",
                 retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
+        history.log(cfg, job, "aucun_candidat", verification="aucun resultat correspondant")
         _schedule_retry(job, cfg.retry_delay_minutes * 60)
         return
 
@@ -176,27 +188,28 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
         _update(job, JobStatus.DOWNLOADING)
 
         try:
-            file_path = await _dl.download(client, candidate)
+            file_path = await _dl.download(_client, candidate)
         except Exception as e:
+            history.log(cfg, job, "echec_download", candidate=candidate, verification=str(e))
             continue  # essayer le candidat suivant
 
         _update(job, JobStatus.VERIFYING)
 
         try:
             result = await analyze_and_verify(
-                file_path        = file_path,
-                expected_bpm     = job.bpm,
+                file_path         = file_path,
+                expected_bpm      = job.bpm,
                 expected_duration = job.duration,
-                bpm_threshold    = cfg.bpm_threshold,
-                cloud_url        = cfg.analyzer_cloud_url,
-                cloud_key        = cfg.analyzer_cloud_key,
+                bpm_threshold     = cfg.bpm_threshold,
+                cloud_url         = cfg.analyzer_cloud_url,
+                cloud_key         = cfg.analyzer_cloud_key,
             )
-        except _AU:
-            # Analyzer indisponible — mettre en pause sans supprimer le fichier
+        except AnalyzerUnavailable:
             _update(job, JobStatus.QUEUED,
                     file_path=file_path,
                     error="analyzer_unavailable",
                     retry_at=datetime.now() + timedelta(minutes=5))
+            history.log(cfg, job, "analyzer_indispo", candidate=candidate)
             _schedule_retry(job, 5 * 60)
             return
 
@@ -209,8 +222,11 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
                         "key":      result.key,
                         "engine":   result.source if result.source else None,
                     })
+            history.log(cfg, job, "done", candidate=candidate, result=result, verification="OK")
             return
         else:
+            history.log(cfg, job, "rejet_verification", candidate=candidate, result=result,
+                        verification=result.reason)
             _dl.delete_file(file_path)
             # Essayer le candidat suivant
 
@@ -218,4 +234,5 @@ async def _process_job(job, client, cfg, _searcher, _dl, analyze_and_verify, Ana
     _update(job, JobStatus.QUEUED,
             error="all_candidates_failed",
             retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
+    history.log(cfg, job, "tous_candidats_echoues", verification=f"{job.attempts} candidat(s) rejete(s)")
     _schedule_retry(job, cfg.retry_delay_minutes * 60)
