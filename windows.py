@@ -207,7 +207,8 @@ def open_status_window(cfg: Config) -> None:
         tab_queue = tk.Frame(nb, bg=BG)
         nb.add(tab_queue, text="Liste d'attente")
         cols_q = ("Track", "Artiste", "Prochain retry", "Raison")
-        tree_q = ttk.Treeview(tab_queue, columns=cols_q, show="headings", height=8)
+        tree_q = ttk.Treeview(tab_queue, columns=cols_q, show="headings", height=8,
+                              selectmode="extended")
         for c in cols_q:
             tree_q.heading(c, text=c)
         tree_q.column("Track",          width=180)
@@ -215,6 +216,32 @@ def open_status_window(cfg: Config) -> None:
         tree_q.column("Prochain retry", width=90)
         tree_q.column("Raison",         width=140)
         tree_q.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Boutons de gestion de la liste d'attente
+        q_btns = tk.Frame(tab_queue, bg=BG)
+        q_btns.pack(fill="x", padx=4, pady=(0, 4))
+
+        def remove_selected():
+            sel = tree_q.selection()
+            if not sel:
+                return
+            for iid in sel:
+                queue_manager.remove_job(iid)
+            win.after(80, refresh)
+
+        def clear_all():
+            if not tree_q.get_children():
+                return
+            if messagebox.askyesno(
+                "Vider la liste d'attente",
+                "Retirer tous les tracks de la liste d'attente ?", parent=win):
+                queue_manager.clear_queued()
+                win.after(80, refresh)
+
+        tk.Button(q_btns, text="Retirer la sélection", command=remove_selected,
+                  bg=BTN_BG, fg=FG).pack(side="left", padx=2)
+        tk.Button(q_btns, text="Tout vider", command=clear_all,
+                  bg=BTN_BG, fg="#ef5350").pack(side="left", padx=2)
 
         def refresh():
             if not win.winfo_exists():
@@ -231,7 +258,7 @@ def open_status_window(cfg: Config) -> None:
                 tree_q.delete(row)
             for job in queue_manager.get_queued_jobs():
                 retry = job.retry_at.strftime("%H:%M:%S") if job.retry_at else "—"
-                tree_q.insert("", "end", values=(
+                tree_q.insert("", "end", iid=job.job_id, values=(
                     job.title, job.artist, retry, job.error or "",
                 ))
             win.after(2000, refresh)

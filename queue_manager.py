@@ -63,16 +63,22 @@ class Job:
 _jobs:      dict[str, Job] = {}
 _state_cb:  list[Callable] = []
 _tasks:     set = set()                       # réfs sur les tâches en cours (évite le GC)
+_retry_by_job: dict[str, asyncio.Task] = {}   # tâche de retry par job_id (pour annulation)
 _semaphore: Optional[asyncio.Semaphore] = None
 _client = None
 _cfg = None
+_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def init(client, cfg) -> None:
     """Stocke le client Soulseek + la config. max_workers<=0 => parallélisme illimité."""
-    global _client, _cfg, _semaphore
+    global _client, _cfg, _semaphore, _loop
     _client = client
     _cfg = cfg
+    try:
+        _loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _loop = None
     n = getattr(cfg, "max_workers", 0) or 0
     _semaphore = asyncio.Semaphore(n) if n > 0 else None
 
@@ -99,7 +105,11 @@ def _spawn(coro) -> None:
 
 
 def _schedule_retry(job: Job, delay_seconds: float) -> None:
-    """Re-traite un job après `delay_seconds`, sans bloquer aucune tâche active."""
+    """Re-traite un job après `delay_seconds`, sans bloquer aucune tâche active.
+
+    La tâche est référencée par job_id pour pouvoir l'annuler (retrait de la
+    liste d'attente).
+    """
     async def _later():
         try:
             await asyncio.sleep(max(0, delay_seconds))
@@ -107,7 +117,17 @@ def _schedule_retry(job: Job, delay_seconds: float) -> None:
             return
         job.retry_at = None
         _spawn(_process_job(job))
-    _spawn(_later())
+
+    task = asyncio.create_task(_later())
+    _tasks.add(task)
+    _retry_by_job[job.job_id] = task
+
+    def _done(t):
+        _tasks.discard(t)
+        if _retry_by_job.get(job.job_id) is t:
+            _retry_by_job.pop(job.job_id, None)
+
+    task.add_done_callback(_done)
 
 
 def create_job(artist: str, title: str, bpm: Optional[float], duration: Optional[float], key: Optional[str]) -> Job:
@@ -134,6 +154,40 @@ def get_active_jobs() -> list[Job]:
 
 def get_queued_jobs() -> list[Job]:
     return [j for j in _jobs.values() if j.status == JobStatus.QUEUED]
+
+
+def _remove_job_impl(job_id: str) -> None:
+    task = _retry_by_job.pop(job_id, None)
+    if task:
+        task.cancel()
+    _jobs.pop(job_id, None)
+    _notify()
+
+
+def remove_job(job_id: str) -> None:
+    """Retire un job de la liste d'attente (thread-safe, appelable depuis tkinter)."""
+    if _loop and _loop.is_running():
+        _loop.call_soon_threadsafe(_remove_job_impl, job_id)
+    else:
+        _remove_job_impl(job_id)
+
+
+def _clear_queued_impl() -> None:
+    for jid, job in list(_jobs.items()):
+        if job.status == JobStatus.QUEUED:
+            task = _retry_by_job.pop(jid, None)
+            if task:
+                task.cancel()
+            _jobs.pop(jid, None)
+    _notify()
+
+
+def clear_queued() -> None:
+    """Vide toute la liste d'attente (thread-safe, appelable depuis tkinter)."""
+    if _loop and _loop.is_running():
+        _loop.call_soon_threadsafe(_clear_queued_impl)
+    else:
+        _clear_queued_impl()
 
 
 def _update(job: Job, status: JobStatus, **kwargs) -> None:
