@@ -81,6 +81,8 @@ def init(client, cfg) -> None:
         _loop = None
     n = getattr(cfg, "max_workers", 0) or 0
     _semaphore = asyncio.Semaphore(n) if n > 0 else None
+    import searcher
+    searcher.set_search_delay(getattr(cfg, "search_delay_seconds", 3.0))
 
 
 def register_state_callback(cb: Callable) -> None:

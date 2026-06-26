@@ -25,6 +25,31 @@ import textutil
 SEARCH_TIMEOUT_S = 15
 MAX_CANDIDATES   = 5
 
+# ── Anti-flood ──────────────────────────────────────────────────────────────────
+# Soulseek limite le débit de recherches par compte/IP. Sans espacement, lancer
+# beaucoup de tracks d'un coup (SLSK ALL) fait ignorer TOUTES les recherches
+# (côté dekkr-slsk ET côté client Soulseek normal). On espace donc le DÉPART de
+# chaque recherche ; les téléchargements restent parallèles.
+_search_delay = 3.0
+_search_gate = asyncio.Lock()
+_last_search_at = 0.0
+
+
+def set_search_delay(seconds: float) -> None:
+    global _search_delay
+    _search_delay = max(0.0, float(seconds or 0))
+
+
+async def _throttle() -> None:
+    """Garantit au moins `_search_delay` secondes entre deux départs de recherche."""
+    global _last_search_at
+    async with _search_gate:
+        loop = asyncio.get_event_loop()
+        wait = _search_delay - (loop.time() - _last_search_at)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_search_at = loop.time()
+
 _FORMAT_SCORE = {"flac": 300, "mp3": 200, "wav": 100}
 
 
@@ -86,6 +111,7 @@ async def search(
     query = textutil.clean_for_search(artist, title)
     accepted = {f.lower() for f in accepted_formats}
 
+    await _throttle()   # espacement anti-flood (couvre aussi les renvois de la file)
     request = await client.searches.search(query)
     await asyncio.sleep(SEARCH_TIMEOUT_S)
 

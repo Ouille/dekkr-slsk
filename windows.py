@@ -338,9 +338,11 @@ def open_settings_window(cfg: Config, on_save: Optional[Callable[[Config], None]
         var_workers = tk.IntVar(value=cfg.max_workers)
         var_retry   = tk.IntVar(value=cfg.retry_delay_minutes)
         var_bpm     = tk.DoubleVar(value=cfg.bpm_threshold)
+        var_sdelay  = tk.DoubleVar(value=getattr(cfg, "search_delay_seconds", 3.0))
         _labeled_spinbox(g5, "Workers simultanés :", var_workers, 0, 1, 3)
         _labeled_spinbox(g5, "Délai retry (min) :",  var_retry,   1, 5, 120)
         _labeled_spinbox(g5, "Seuil BPM (±) :",      var_bpm,     2, 0.5, 10.0, 0.5, "%.1f")
+        _labeled_spinbox(g5, "Délai entre recherches (s) :", var_sdelay, 3, 0.0, 30.0, 0.5, "%.1f")
 
         # Cloud analyzer (optionnel)
         section("Analyzer cloud (optionnel)")
@@ -363,9 +365,16 @@ def open_settings_window(cfg: Config, on_save: Optional[Callable[[Config], None]
             cfg.max_workers         = var_workers.get()
             cfg.retry_delay_minutes = var_retry.get()
             cfg.bpm_threshold       = round(var_bpm.get(), 1)
+            cfg.search_delay_seconds = round(var_sdelay.get(), 1)
             cfg.analyzer_cloud_url  = var_cloud_url.get().strip()
             cfg.analyzer_cloud_key  = var_cloud_key.get().strip()
             save_config(cfg)
+            # Application immédiate du délai de recherche (sans redémarrage)
+            try:
+                import searcher
+                searcher.set_search_delay(cfg.search_delay_seconds)
+            except Exception:
+                pass
             if on_save:
                 on_save(cfg)
             win.destroy()

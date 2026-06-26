@@ -13,6 +13,7 @@ DEFAULT_MAX_WORKERS = 2
 DEFAULT_MIN_QUALITY_KBPS = 320
 DEFAULT_RETRY_DELAY_MINUTES = 30
 DEFAULT_BPM_THRESHOLD = 2.0
+DEFAULT_SEARCH_DELAY_SECONDS = 3.0
 
 
 def _config_path() -> str:
@@ -63,6 +64,7 @@ class Config:
     max_workers: int = DEFAULT_MAX_WORKERS
     retry_delay_minutes: int = DEFAULT_RETRY_DELAY_MINUTES
     bpm_threshold: float = DEFAULT_BPM_THRESHOLD
+    search_delay_seconds: float = DEFAULT_SEARCH_DELAY_SECONDS
     port: int = DEFAULT_PORT
     autostart: bool = True
     analyzer_cloud_url: str = ""  # optionnel — fallback si bridge local absent
@@ -86,6 +88,7 @@ def load_config() -> Config:
             max_workers=int(d.get("max_workers", DEFAULT_MAX_WORKERS)),
             retry_delay_minutes=int(d.get("retry_delay_minutes", DEFAULT_RETRY_DELAY_MINUTES)),
             bpm_threshold=float(d.get("bpm_threshold", DEFAULT_BPM_THRESHOLD)),
+            search_delay_seconds=float(d.get("search_delay_seconds", DEFAULT_SEARCH_DELAY_SECONDS)),
             port=int(d.get("port", DEFAULT_PORT)),
             autostart=bool(d.get("autostart", True)),
             analyzer_cloud_url=d.get("analyzer_cloud_url", ""),
@@ -105,6 +108,7 @@ def save_config(cfg: Config) -> None:
         "max_workers": cfg.max_workers,
         "retry_delay_minutes": cfg.retry_delay_minutes,
         "bpm_threshold": cfg.bpm_threshold,
+        "search_delay_seconds": cfg.search_delay_seconds,
         "port": cfg.port,
         "autostart": cfg.autostart,
         "analyzer_cloud_url": cfg.analyzer_cloud_url,
