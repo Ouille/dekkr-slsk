@@ -10,10 +10,13 @@ a = Analysis(
     hiddenimports=[
         'pystray._win32',
         'PIL._tkinter_finder',
+        'wishlist',
         'aioslsk',
         'aioslsk.client',
         'aioslsk.settings',
         'aioslsk.search',
+        'aioslsk.search.model',
+        'aioslsk.events',
         'aioslsk.transfer',
         'aioslsk.network',
         'aioslsk.network.network',

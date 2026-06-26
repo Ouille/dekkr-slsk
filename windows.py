@@ -183,6 +183,7 @@ def open_status_window(cfg: Config) -> None:
             return
 
         import queue_manager
+        import wishlist
 
         win = tk.Toplevel(root)
         win.title(f"{APP_TITLE} — Statut")
@@ -205,19 +206,19 @@ def open_status_window(cfg: Config) -> None:
         tree_a.pack(fill="both", expand=True, padx=4, pady=4)
 
         tab_queue = tk.Frame(nb, bg=BG)
-        nb.add(tab_queue, text="Liste d'attente")
-        cols_q = ("Track", "Artiste", "Prochain retry", "Raison")
+        nb.add(tab_queue, text="Wishlist")
+        cols_q = ("Track", "Artiste", "Ajouté le", "Raison")
         tree_q = ttk.Treeview(tab_queue, columns=cols_q, show="headings", height=8,
                               selectmode="extended")
         for c in cols_q:
             tree_q.heading(c, text=c)
-        tree_q.column("Track",          width=180)
-        tree_q.column("Artiste",        width=120)
-        tree_q.column("Prochain retry", width=90)
-        tree_q.column("Raison",         width=140)
+        tree_q.column("Track",     width=180)
+        tree_q.column("Artiste",   width=120)
+        tree_q.column("Ajouté le", width=110)
+        tree_q.column("Raison",    width=130)
         tree_q.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # Boutons de gestion de la liste d'attente
+        # Boutons de gestion de la wishlist
         q_btns = tk.Frame(tab_queue, bg=BG)
         q_btns.pack(fill="x", padx=4, pady=(0, 4))
 
@@ -226,16 +227,16 @@ def open_status_window(cfg: Config) -> None:
             if not sel:
                 return
             for iid in sel:
-                queue_manager.remove_job(iid)
+                wishlist.remove(iid)
             win.after(80, refresh)
 
         def clear_all():
             if not tree_q.get_children():
                 return
             if messagebox.askyesno(
-                "Vider la liste d'attente",
-                "Retirer tous les tracks de la liste d'attente ?", parent=win):
-                queue_manager.clear_queued()
+                "Vider la wishlist",
+                "Retirer tous les tracks de la wishlist ?", parent=win):
+                wishlist.clear()
                 win.after(80, refresh)
 
         tk.Button(q_btns, text="Retirer la sélection", command=remove_selected,
@@ -256,10 +257,10 @@ def open_status_window(cfg: Config) -> None:
                 ))
             for row in tree_q.get_children():
                 tree_q.delete(row)
-            for job in queue_manager.get_queued_jobs():
-                retry = job.retry_at.strftime("%H:%M:%S") if job.retry_at else "—"
-                tree_q.insert("", "end", iid=job.job_id, values=(
-                    job.title, job.artist, retry, job.error or "",
+            for item in wishlist.items():
+                added = item.added_at.strftime("%d/%m %H:%M") if item.added_at else "—"
+                tree_q.insert("", "end", iid=item.query, values=(
+                    item.title, item.artist, added, item.reason or "",
                 ))
             win.after(2000, refresh)
 

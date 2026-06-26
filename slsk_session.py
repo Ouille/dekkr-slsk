@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 
 from aioslsk.client import SoulSeekClient
+from aioslsk.events import SearchResultEvent
 from aioslsk.settings import Settings, CredentialsSettings, SharesSettings, NetworkSettings, ListeningSettings, PeerSettings
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,12 @@ def _notify(connected: bool) -> None:
 
 def get_client() -> Optional[SoulSeekClient]:
     return _client
+
+
+def register_result_handler(handler) -> None:
+    """Abonne un handler (async) aux résultats de recherche (dont wishlist)."""
+    if _client is not None:
+        _client.events.register(SearchResultEvent, handler)
 
 
 def is_connected() -> bool:

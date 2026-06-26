@@ -106,6 +106,22 @@ def rename_to(path: str, artist: str, title: str) -> str:
         return path  # on garde le fichier d'origine si le renommage échoue
 
 
+def already_present(folder: str, artist: str, title: str, accepted_formats: list[str]) -> str | None:
+    """
+    Retourne le chemin si « Artiste - Titre.<ext> » existe déjà dans `folder`
+    pour l'une des extensions acceptées, sinon None. Sert à éviter les
+    re-téléchargements (anti BUG-006).
+    """
+    if not folder:
+        return None
+    for ext in accepted_formats:
+        name = textutil.safe_filename(artist, title, ext)
+        path = os.path.join(folder, name)
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def delete_file(path: str) -> None:
     try:
         if path and os.path.exists(path):

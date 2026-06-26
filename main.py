@@ -57,6 +57,15 @@ async def _async_main(cfg, tray_ref: list) -> None:
     # Stocke client + config : chaque job lancera sa propre tâche (parallélisme illimité)
     queue_manager.init(client, cfg)
 
+    # Wishlist (recherche différée) : charge la persistance, réinjecte dans aioslsk,
+    # et s'abonne aux résultats de recherche.
+    import wishlist
+    wishlist.init(
+        client, cfg,
+        notify_cb=lambda msg: tray_ref[0].notify(msg) if tray_ref and tray_ref[0] else None,
+    )
+    slsk_session.register_result_handler(wishlist.on_search_result)
+
     # Callback état : mise à jour du tray
     def on_state(active: int, waiting: int) -> None:
         if tray_ref and tray_ref[0]:

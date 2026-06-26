@@ -117,28 +117,39 @@ async def search(
 
     candidates: list[SearchCandidate] = []
     for result in getattr(request, "results", []):
-        for item in getattr(result, "shared_items", []):
-            filename = os.path.basename(
-                (item.filename or "").replace("\\", "/")
-            )
-            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-            if ext not in accepted:
-                continue
-
-            bitrate, duration = _extract_attributes(item)
-            c = SearchCandidate(
-                username    = result.username,
-                remote_path = item.filename,
-                filename    = filename,
-                fmt         = ext,
-                size        = int(getattr(item, "filesize", 0) or 0),
-                bitrate     = bitrate,
-                duration    = duration,
-                free_slot   = bool(getattr(result, "has_free_slots", False)),
-            )
-            c.score = _score(c, expected_duration or 0, min_quality_kbps)
-            if c.score >= 0:
-                candidates.append(c)
+        candidates.extend(
+            candidates_from_result(result, expected_duration or 0, accepted, min_quality_kbps)
+        )
 
     candidates.sort(key=lambda x: x.score, reverse=True)
     return candidates[:MAX_CANDIDATES]
+
+
+def candidates_from_result(result, expected_dur: float, accepted: set, min_kbps: int) -> list[SearchCandidate]:
+    """
+    Transforme un SearchResult (résultat d'un peer) en candidats scorés et filtrés.
+    Partagé par la recherche active et la wishlist (même logique de scoring).
+    `accepted` = set d'extensions en minuscules.
+    """
+    out: list[SearchCandidate] = []
+    for item in getattr(result, "shared_items", []):
+        filename = os.path.basename((item.filename or "").replace("\\", "/"))
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in accepted:
+            continue
+
+        bitrate, duration = _extract_attributes(item)
+        c = SearchCandidate(
+            username    = result.username,
+            remote_path = item.filename,
+            filename    = filename,
+            fmt         = ext,
+            size        = int(getattr(item, "filesize", 0) or 0),
+            bitrate     = bitrate,
+            duration    = duration,
+            free_slot   = bool(getattr(result, "has_free_slots", False)),
+        )
+        c.score = _score(c, expected_dur or 0, min_kbps)
+        if c.score >= 0:
+            out.append(c)
+    return out

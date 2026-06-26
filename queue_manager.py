@@ -6,15 +6,18 @@ Le parallélisme est illimité si cfg.max_workers <= 0, sinon plafonné par un
 sémaphore à max_workers jobs simultanés.
 
 États d'un job :
-  searching → downloading → verifying → done
-                                      → queued (aucun/tous candidats échoués, retry planifié)
-                                      → failed (erreur de recherche)
+  searching → downloading → done
+                          → (aucun candidat / tous downloads échoués) → wishlist (SPEC-SLSK-003)
+                          → failed (erreur de recherche)
+
+La recherche différée passe désormais par la wishlist Soulseek (module wishlist),
+en remplacement du retry actif (ADR-020).
 """
 
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 from typing import Optional, Callable
 
@@ -63,22 +66,16 @@ class Job:
 _jobs:      dict[str, Job] = {}
 _state_cb:  list[Callable] = []
 _tasks:     set = set()                       # réfs sur les tâches en cours (évite le GC)
-_retry_by_job: dict[str, asyncio.Task] = {}   # tâche de retry par job_id (pour annulation)
 _semaphore: Optional[asyncio.Semaphore] = None
 _client = None
 _cfg = None
-_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def init(client, cfg) -> None:
     """Stocke le client Soulseek + la config. max_workers<=0 => parallélisme illimité."""
-    global _client, _cfg, _semaphore, _loop
+    global _client, _cfg, _semaphore
     _client = client
     _cfg = cfg
-    try:
-        _loop = asyncio.get_running_loop()
-    except RuntimeError:
-        _loop = None
     n = getattr(cfg, "max_workers", 0) or 0
     _semaphore = asyncio.Semaphore(n) if n > 0 else None
     import searcher
@@ -90,8 +87,12 @@ def register_state_callback(cb: Callable) -> None:
 
 
 def _notify() -> None:
-    active  = sum(1 for j in _jobs.values() if j.status in (JobStatus.SEARCHING, JobStatus.DOWNLOADING, JobStatus.VERIFYING))
-    waiting = sum(1 for j in _jobs.values() if j.status == JobStatus.QUEUED)
+    active = sum(1 for j in _jobs.values() if j.status in (JobStatus.SEARCHING, JobStatus.DOWNLOADING, JobStatus.VERIFYING))
+    try:
+        import wishlist
+        waiting = wishlist.count()   # la wishlist est la nouvelle "liste d'attente"
+    except Exception:
+        waiting = 0
     for cb in _state_cb:
         try:
             cb(active, waiting)
@@ -99,37 +100,16 @@ def _notify() -> None:
             pass
 
 
+def notify_state() -> None:
+    """Rafraîchit l'état (badge tray). Appelé aussi par le module wishlist."""
+    _notify()
+
+
 def _spawn(coro) -> None:
     """Lance une coroutine en tâche de fond avec réf conservée."""
     task = asyncio.create_task(coro)
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
-
-
-def _schedule_retry(job: Job, delay_seconds: float) -> None:
-    """Re-traite un job après `delay_seconds`, sans bloquer aucune tâche active.
-
-    La tâche est référencée par job_id pour pouvoir l'annuler (retrait de la
-    liste d'attente).
-    """
-    async def _later():
-        try:
-            await asyncio.sleep(max(0, delay_seconds))
-        except asyncio.CancelledError:
-            return
-        job.retry_at = None
-        _spawn(_process_job(job))
-
-    task = asyncio.create_task(_later())
-    _tasks.add(task)
-    _retry_by_job[job.job_id] = task
-
-    def _done(t):
-        _tasks.discard(t)
-        if _retry_by_job.get(job.job_id) is t:
-            _retry_by_job.pop(job.job_id, None)
-
-    task.add_done_callback(_done)
 
 
 def create_job(artist: str, title: str, bpm: Optional[float], duration: Optional[float], key: Optional[str]) -> Job:
@@ -152,44 +132,6 @@ def get_job(job_id: str) -> Optional[Job]:
 
 def get_active_jobs() -> list[Job]:
     return [j for j in _jobs.values() if j.status in (JobStatus.SEARCHING, JobStatus.DOWNLOADING, JobStatus.VERIFYING)]
-
-
-def get_queued_jobs() -> list[Job]:
-    return [j for j in _jobs.values() if j.status == JobStatus.QUEUED]
-
-
-def _remove_job_impl(job_id: str) -> None:
-    task = _retry_by_job.pop(job_id, None)
-    if task:
-        task.cancel()
-    _jobs.pop(job_id, None)
-    _notify()
-
-
-def remove_job(job_id: str) -> None:
-    """Retire un job de la liste d'attente (thread-safe, appelable depuis tkinter)."""
-    if _loop and _loop.is_running():
-        _loop.call_soon_threadsafe(_remove_job_impl, job_id)
-    else:
-        _remove_job_impl(job_id)
-
-
-def _clear_queued_impl() -> None:
-    for jid, job in list(_jobs.items()):
-        if job.status == JobStatus.QUEUED:
-            task = _retry_by_job.pop(jid, None)
-            if task:
-                task.cancel()
-            _jobs.pop(jid, None)
-    _notify()
-
-
-def clear_queued() -> None:
-    """Vide toute la liste d'attente (thread-safe, appelable depuis tkinter)."""
-    if _loop and _loop.is_running():
-        _loop.call_soon_threadsafe(_clear_queued_impl)
-    else:
-        _clear_queued_impl()
 
 
 def _update(job: Job, status: JobStatus, **kwargs) -> None:
@@ -237,11 +179,11 @@ async def _run(job: Job) -> None:
         return
 
     if not candidates:
-        _update(job, JobStatus.QUEUED,
-                error="no_candidate_found",
-                retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
-        history.log(cfg, job, "aucun_candidat", verification="aucun resultat correspondant")
-        _schedule_retry(job, cfg.retry_delay_minutes * 60)
+        # Recherche différée via wishlist (remplace le retry actif — ADR-020)
+        import wishlist
+        wishlist.add(job, "aucun_candidat")
+        _jobs.pop(job.job_id, None)
+        _notify()
         return
 
     for candidate in candidates:
@@ -271,10 +213,8 @@ async def _run(job: Job) -> None:
                     local_path=file_path, verification="non verifie")
         return
 
-    # Tous les candidats ont échoué au téléchargement
-    _update(job, JobStatus.QUEUED,
-            error="all_downloads_failed",
-            retry_at=datetime.now() + timedelta(minutes=cfg.retry_delay_minutes))
-    history.log(cfg, job, "echec_tous_telechargements",
-                verification=f"{job.attempts} tentative(s) echouee(s)")
-    _schedule_retry(job, cfg.retry_delay_minutes * 60)
+    # Tous les candidats ont échoué au téléchargement → recherche différée (wishlist)
+    import wishlist
+    wishlist.add(job, "echecs_download")
+    _jobs.pop(job.job_id, None)
+    _notify()
