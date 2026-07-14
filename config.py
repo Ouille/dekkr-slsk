@@ -69,6 +69,7 @@ class Config:
     wishlist_collect_seconds: float = DEFAULT_WISHLIST_COLLECT_SECONDS
     port: int = DEFAULT_PORT
     autostart: bool = True
+    share_enabled: bool = True    # SPEC-SLSK-005 — partage Soulseek du download_folder (opt-out)
     analyzer_cloud_url: str = ""  # optionnel — fallback si bridge local absent
     analyzer_cloud_key: str = ""
 
@@ -94,6 +95,7 @@ def load_config() -> Config:
             wishlist_collect_seconds=float(d.get("wishlist_collect_seconds", DEFAULT_WISHLIST_COLLECT_SECONDS)),
             port=int(d.get("port", DEFAULT_PORT)),
             autostart=bool(d.get("autostart", True)),
+            share_enabled=bool(d.get("share_enabled", True)),
             analyzer_cloud_url=d.get("analyzer_cloud_url", ""),
             analyzer_cloud_key=d.get("analyzer_cloud_key", ""),
         )
@@ -115,6 +117,7 @@ def save_config(cfg: Config) -> None:
         "wishlist_collect_seconds": cfg.wishlist_collect_seconds,
         "port": cfg.port,
         "autostart": cfg.autostart,
+        "share_enabled": cfg.share_enabled,
         "analyzer_cloud_url": cfg.analyzer_cloud_url,
         "analyzer_cloud_key": cfg.analyzer_cloud_key,
     }

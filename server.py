@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 import queue_manager
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 _slsk_connected = False
 _download_folder: Optional[str] = None

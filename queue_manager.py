@@ -211,6 +211,10 @@ async def _run(job: Job) -> None:
                 })
         history.log(cfg, job, "telecharge", candidate=candidate, meta=meta,
                     local_path=file_path, verification="non verifie")
+        # SPEC-SLSK-005 (D5) : re-scanner les partages pour exposer le nouveau fichier (si partage actif).
+        if getattr(cfg, "share_enabled", True):
+            import slsk_session
+            _spawn(slsk_session.rescan_shares())
         return
 
     # Tous les candidats ont échoué au téléchargement → recherche différée (wishlist)

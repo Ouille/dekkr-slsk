@@ -345,6 +345,20 @@ def open_settings_window(cfg: Config, on_save: Optional[Callable[[Config], None]
         _labeled_spinbox(g5, "Seuil BPM (±) :",      var_bpm,     2, 0.5, 10.0, 0.5, "%.1f")
         _labeled_spinbox(g5, "Délai entre recherches (s) :", var_sdelay, 3, 0.0, 30.0, 0.5, "%.1f")
 
+        # Partage Soulseek (SPEC-SLSK-005)
+        section("Partage Soulseek")
+        g_share = grid_frame()
+        var_share = tk.BooleanVar(value=getattr(cfg, "share_enabled", True))
+        tk.Checkbutton(g_share, text="Partager mes téléchargements sur Soulseek",
+                       variable=var_share, bg=BG, fg=FG, selectcolor=BTN_BG,
+                       activebackground=BG, anchor="w").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=8)
+        tk.Label(g_share,
+                 text="Les fichiers de votre dossier de téléchargement deviennent accessibles "
+                      "aux autres utilisateurs Soulseek. Changement pris en compte au redémarrage.",
+                 bg=BG, fg="#888", wraplength=440, justify="left", anchor="w").grid(
+            row=1, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4))
+
         # Cloud analyzer (optionnel)
         section("Analyzer cloud (optionnel)")
         g6 = grid_frame()
@@ -367,6 +381,7 @@ def open_settings_window(cfg: Config, on_save: Optional[Callable[[Config], None]
             cfg.retry_delay_minutes = var_retry.get()
             cfg.bpm_threshold       = round(var_bpm.get(), 1)
             cfg.search_delay_seconds = round(var_sdelay.get(), 1)
+            cfg.share_enabled       = var_share.get()
             cfg.analyzer_cloud_url  = var_cloud_url.get().strip()
             cfg.analyzer_cloud_key  = var_cloud_key.get().strip()
             save_config(cfg)

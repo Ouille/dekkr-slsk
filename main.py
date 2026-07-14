@@ -22,7 +22,7 @@ import slsk_session
 from tray import TrayIcon
 from windows import open_setup_window, open_status_window, open_settings_window, start_tk_thread
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 def _start_server(cfg, loop: asyncio.AbstractEventLoop) -> uvicorn.Server:
@@ -43,7 +43,7 @@ async def _async_main(cfg, tray_ref: list) -> None:
     """Boucle asyncio principale : connexion Soulseek + traitement des jobs."""
     # Connexion Soulseek
     try:
-        client = await slsk_session.connect(cfg.soulseek_username, cfg.soulseek_password, cfg.download_folder)
+        client = await slsk_session.connect(cfg.soulseek_username, cfg.soulseek_password, cfg.download_folder, cfg.share_enabled)
         _server.set_connected(True)
     except Exception as e:
         _server.set_connected(False)
