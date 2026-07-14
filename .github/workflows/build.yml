@@ -12,6 +12,8 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write   # requis pour que softprops/action-gh-release crée la Release
 
     steps:
       - name: Checkout
