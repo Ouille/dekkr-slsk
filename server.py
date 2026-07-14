@@ -7,15 +7,22 @@ from pydantic import BaseModel
 
 import queue_manager
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 _slsk_connected = False
+_download_folder: Optional[str] = None
 _on_job_created: list = []
 
 
 def set_connected(val: bool) -> None:
     global _slsk_connected
     _slsk_connected = val
+
+
+def set_download_folder(path: Optional[str]) -> None:
+    """Dossier de téléchargement exposé via /health (consommé par DekkR — SPEC-SLSK-004)."""
+    global _download_folder
+    _download_folder = path
 
 
 def register_job_callback(cb) -> None:
@@ -39,7 +46,12 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": VERSION, "connected": _slsk_connected}
+    return {
+        "status":          "ok",
+        "version":         VERSION,
+        "connected":       _slsk_connected,
+        "download_folder": _download_folder,
+    }
 
 
 class SearchRequest(BaseModel):

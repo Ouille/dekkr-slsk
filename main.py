@@ -22,7 +22,7 @@ import slsk_session
 from tray import TrayIcon
 from windows import open_setup_window, open_status_window, open_settings_window, start_tk_thread
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def _start_server(cfg, loop: asyncio.AbstractEventLoop) -> uvicorn.Server:
@@ -111,6 +111,9 @@ def main() -> None:
         t.start()
         setup_done.wait()
         cfg = setup_result[0]
+
+    # Exposer le dossier de téléchargement via /health (consommé par DekkR — SPEC-SLSK-004)
+    _server.set_download_folder(cfg.download_folder)
 
     # Démarrer la boucle asyncio dans un thread daemon
     loop = asyncio.new_event_loop()
