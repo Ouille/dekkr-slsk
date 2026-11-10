@@ -22,7 +22,7 @@ import slsk_session
 from tray import TrayIcon
 from windows import open_setup_window, open_status_window, open_settings_window, start_tk_thread
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 def _start_server(cfg, loop: asyncio.AbstractEventLoop) -> uvicorn.Server:

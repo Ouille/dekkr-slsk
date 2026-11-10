@@ -19,6 +19,7 @@ au passage en wishlist ; DekkR recevait alors 404 sur /status et affichait
 """
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -50,6 +51,7 @@ REASON_ERREUR_RECHERCHE = "erreur_recherche"
 REASON_DEJA_PRESENT     = "deja_present"
 REASON_WISHLIST_TROUVE  = "wishlist_trouve"
 REASON_WISHLIST_RETIRE  = "wishlist_retire"
+REASON_ECHEC_CHOISI     = "echec_choisi"     # SPEC-SLSK-008 D7 — fichier choisi à la main
 
 
 @dataclass
@@ -179,6 +181,52 @@ def create_job(artist: str, title: str, bpm: Optional[float], duration: Optional
     _prune()
     _spawn(_process_job(job))   # démarre immédiatement, en parallèle
     return job
+
+
+def create_chosen_job(candidate, artist: str, title: str) -> Job:
+    """
+    SPEC-SLSK-008 D7 — fichier CHOISI dans une recherche manuelle : le job démarre à
+    `downloading` (pas de recherche) et, s'il échoue, NE passe PAS en liste d'attente
+    (elle chercherait « artiste titre » et prendrait un autre fichier).
+    Titre vide ⇒ le fichier garde son nom d'origine ; le job prend ce nom pour titre.
+    """
+    shown_title = title or os.path.splitext(candidate.filename)[0]
+    job = Job(job_id=str(uuid.uuid4()), artist=artist or "", title=shown_title,
+              bpm=None, duration=None, key=None, status=JobStatus.DOWNLOADING)
+    job.candidate = candidate
+    _jobs[job.job_id] = job
+    _prune()
+    _notify()
+    _spawn(_run_chosen(job, candidate, rename=bool(artist and title)))
+    return job
+
+
+async def _run_chosen(job: Job, candidate, rename: bool) -> None:
+    import downloader as _dl
+    from verifier import read_metadata
+    cfg = _cfg
+    job.attempts = 1
+
+    def _on_transfer(t, _job=job):
+        _job.transfer = t
+
+    try:
+        file_path = await _dl.download(_client, candidate, on_transfer=_on_transfer)
+    except Exception as e:
+        _update(job, JobStatus.FAILED, reason=REASON_ECHEC_CHOISI, error=str(e))
+        history.log(cfg, job, "echec_download", candidate=candidate, verification=str(e))
+        return
+    if rename:
+        file_path = _dl.rename_to(file_path, job.artist, job.title)
+    meta = read_metadata(file_path)
+    _update(job, JobStatus.DONE, file_path=file_path, reason=None,
+            analysis={"bpm": meta.get("bpm"), "duration": meta.get("duration"),
+                      "key": meta.get("key"), "engine": "tags"})
+    history.log(cfg, job, "telecharge", candidate=candidate, meta=meta,
+                local_path=file_path, verification="choisi")
+    if getattr(cfg, "share_enabled", True):
+        import slsk_session
+        _spawn(slsk_session.rescan_shares())
 
 
 def get_job(job_id: str) -> Optional[Job]:

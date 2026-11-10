@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import queue_manager
 import history
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 _slsk_connected = False
 _download_folder: Optional[str] = None
@@ -143,3 +143,56 @@ async def remove_wish(req: WishRemoveRequest):
     if not wishlist.remove_now(req.query):
         raise HTTPException(404, detail="Absent de la liste d'attente")
     return Response(status_code=204)
+
+
+# ── SPEC-SLSK-008 : recherche manuelle et choix du fichier ─────────────────────
+
+def _accepted() -> set:
+    return {f.lower() for f in (getattr(_cfg, "accepted_formats", None) or ["mp3", "flac", "wav"])}
+
+
+class QueryRequest(BaseModel):
+    artist: str = ""
+    title:  str = ""
+
+
+@app.post("/query", status_code=202)
+async def start_query(req: QueryRequest):
+    if not _slsk_connected:
+        raise HTTPException(503, detail="Non connecté au réseau Soulseek")
+    if not (req.artist.strip() or req.title.strip()):
+        raise HTTPException(422, detail="Artiste ou titre requis")
+    import searcher
+    import slsk_session
+    ms = searcher.start_manual(slsk_session.get_client(), req.artist.strip(), req.title.strip())
+    return {"search_id": ms.search_id}
+
+
+@app.get("/query/{search_id}")
+async def get_query(search_id: str):
+    import searcher
+    ms = searcher.get_manual(search_id)
+    if ms is None:
+        raise HTTPException(404, detail="Recherche inconnue ou expirée")
+    return searcher.manual_view(ms, _accepted(), int(getattr(_cfg, "min_quality_kbps", 0) or 0))
+
+
+class DownloadRequest(BaseModel):
+    search_id:   str
+    username:    str
+    remote_path: str
+    artist:      str = ""
+    title:       str = ""
+
+
+@app.post("/download", status_code=202)
+async def download_chosen(req: DownloadRequest):
+    if not _slsk_connected:
+        raise HTTPException(503, detail="Non connecté au réseau Soulseek")
+    import searcher
+    # D6 : seulement un fichier issu des résultats de CETTE recherche.
+    cand = searcher.find_manual_candidate(req.search_id, req.username, req.remote_path, _accepted())
+    if cand is None:
+        raise HTTPException(404, detail="Fichier absent des résultats de cette recherche")
+    job = queue_manager.create_chosen_job(cand, req.artist.strip(), req.title.strip())
+    return {"job_id": job.job_id}
