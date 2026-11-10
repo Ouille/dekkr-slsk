@@ -70,6 +70,8 @@ class Config:
     port: int = DEFAULT_PORT
     autostart: bool = True
     share_enabled: bool = True    # SPEC-SLSK-005 — partage Soulseek du download_folder (opt-out)
+    # SPEC-SLSK-007 D12 — sites autorisés à appeler le démon (CORS). Vide = valeurs par défaut.
+    allowed_origins: list = field(default_factory=list)
     analyzer_cloud_url: str = ""  # optionnel — fallback si bridge local absent
     analyzer_cloud_key: str = ""
 
@@ -96,6 +98,7 @@ def load_config() -> Config:
             port=int(d.get("port", DEFAULT_PORT)),
             autostart=bool(d.get("autostart", True)),
             share_enabled=bool(d.get("share_enabled", True)),
+            allowed_origins=list(d.get("allowed_origins", []) or []),
             analyzer_cloud_url=d.get("analyzer_cloud_url", ""),
             analyzer_cloud_key=d.get("analyzer_cloud_key", ""),
         )
@@ -118,6 +121,7 @@ def save_config(cfg: Config) -> None:
         "port": cfg.port,
         "autostart": cfg.autostart,
         "share_enabled": cfg.share_enabled,
+        "allowed_origins": cfg.allowed_origins,
         "analyzer_cloud_url": cfg.analyzer_cloud_url,
         "analyzer_cloud_key": cfg.analyzer_cloud_key,
     }

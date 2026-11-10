@@ -1,13 +1,14 @@
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import queue_manager
+import history
 
-VERSION = "1.0.3"
+VERSION = "1.1.0"
 
 _slsk_connected = False
 _download_folder: Optional[str] = None
@@ -36,12 +37,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="dekkr-slsk", version=VERSION, lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+# SPEC-SLSK-007 D12 : avant, `allow_origins=["*"]` — n'importe quel site ouvert dans le
+# navigateur pouvait lancer des téléchargements, et lirait l'historique via /jobs.
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://dekk-r.com",
+    "https://www.dekk-r.com",
+    "http://localhost:5173",
+]
+_cors_installed = False
+_cfg = None
+
+
+def install_cors(origins: Optional[list] = None) -> None:
+    """À appeler AVANT le démarrage d'uvicorn (Starlette fige les middlewares au 1er appel)."""
+    global _cors_installed
+    if _cors_installed:
+        return
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(origins or DEFAULT_ALLOWED_ORIGINS),
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+    _cors_installed = True
+
+
+def set_config(cfg) -> None:
+    """Config lue par /jobs (dossier du journal)."""
+    global _cfg
+    _cfg = cfg
 
 
 @app.get("/health")
@@ -87,3 +111,35 @@ async def status(job_id: str):
     if not job:
         raise HTTPException(404, detail="Job introuvable")
     return job.to_dict()
+
+
+# ── SPEC-SLSK-007 : suivi des téléchargements ──────────────────────────────────
+
+JOURNAL_LIMIT = 20
+
+
+@app.get("/jobs")
+async def jobs():
+    """Jobs de la session (mémoire) + les 20 dernières demandes terminées des sessions précédentes."""
+    out = [j.to_dict() for j in queue_manager.all_jobs()]
+    if _cfg is not None:
+        out += history.read_recent(_cfg, before=queue_manager.STARTED_AT, limit=JOURNAL_LIMIT)
+    return {"jobs": out}
+
+
+@app.get("/wishlist")
+async def get_wishlist():
+    import wishlist
+    return {"items": wishlist.to_dicts()}
+
+
+class WishRemoveRequest(BaseModel):
+    query: str
+
+
+@app.post("/wishlist/remove", status_code=204)
+async def remove_wish(req: WishRemoveRequest):
+    import wishlist
+    if not wishlist.remove_now(req.query):
+        raise HTTPException(404, detail="Absent de la liste d'attente")
+    return Response(status_code=204)

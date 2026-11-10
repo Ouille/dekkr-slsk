@@ -133,3 +133,58 @@ def _needs_header(path: str) -> bool:
     except OSError:
         pass
     return True
+
+
+# ── Lecture : historique des sessions précédentes (SPEC-SLSK-007 D8) ───────────
+
+# Statut du journal → (statut de job, code de raison). Les autres lignes (échec d'un
+# candidat, ajout en wishlist) ne terminent pas une demande : elles sont ignorées.
+_TERMINAL_ROWS = {
+    "telecharge":       ("done",   None),
+    "wishlist_trouve":  ("done",   "wishlist_trouve"),
+    "deja_present":     ("done",   "deja_present"),
+    "erreur_recherche": ("failed", "erreur_recherche"),
+}
+
+
+def read_recent(cfg, before: datetime, limit: int = 20) -> list[dict]:
+    """
+    Les `limit` dernières demandes TERMINÉES du journal, horodatées avant `before`
+    (le démarrage du démon : les jobs de la session courante sont déjà en mémoire).
+    Format identique à Job.to_dict, `source: "journal"`. Ne lève jamais.
+    """
+    path = _path(cfg)
+    rows: list[dict] = []
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            for i, r in enumerate(csv.DictReader(f)):
+                mapped = _TERMINAL_ROWS.get(r.get("statut") or "")
+                if not mapped:
+                    continue
+                try:
+                    at = datetime.fromisoformat(r.get("horodatage") or "")
+                except ValueError:
+                    continue
+                if at >= before:
+                    continue
+                status, reason = mapped
+                ts = at.isoformat(timespec="seconds")
+                rows.append({
+                    "job_id":     f"journal:{i}",
+                    "artist":     r.get("artiste_demande") or "",
+                    "title":      r.get("titre_demande") or "",
+                    "status":     status,
+                    "reason":     reason,
+                    "file_path":  r.get("fichier_renomme") or None,
+                    "analysis":   None,
+                    "error":      (r.get("verification") or None) if status == "failed" else None,
+                    "attempts":   0,
+                    "progress":   None,
+                    "retry_at":   None,
+                    "created_at": ts,
+                    "updated_at": ts,
+                    "source":     "journal",
+                })
+    except (OSError, csv.Error):
+        return []
+    return rows[-limit:][::-1]

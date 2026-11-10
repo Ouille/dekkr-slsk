@@ -148,6 +148,37 @@ def _notify_tray(msg: str) -> None:
 
 # ── API publique ────────────────────────────────────────────────────────────────
 
+def has(query: str) -> bool:
+    return bool(query) and query in _items
+
+
+def to_dicts() -> list[dict]:
+    """Items en attente, pour GET /wishlist (SPEC-SLSK-007)."""
+    return [
+        {"query": it.query, "artist": it.artist, "title": it.title, "reason": it.reason,
+         "added_at": it.added_at.isoformat(timespec="seconds")}
+        for it in sorted(_items.values(), key=lambda i: i.added_at, reverse=True)
+    ]
+
+
+def remove_now(query: str) -> bool:
+    """Retrait depuis la boucle asyncio (API HTTP). Retourne False si absent."""
+    if query not in _items:
+        return False
+    _remove_impl(query)
+    _resolve_jobs(query, ok=False)
+    return True
+
+
+def _resolve_jobs(query: str, ok: bool, file_path=None) -> None:
+    """Tient à jour les jobs DekkR en attente sur cette requête (SPEC-SLSK-007 D4)."""
+    try:
+        import queue_manager
+        queue_manager.resolve_wish(query, ok, file_path)
+    except Exception:
+        pass
+
+
 def count() -> int:
     return len(_items)
 
@@ -204,7 +235,10 @@ def _remove_impl(query: str) -> None:
 
 
 def _clear_impl() -> None:
+    queries = list(_items.keys())
     _items.clear()
+    for q in queries:
+        _resolve_jobs(q, ok=False)
     if _client is not None:
         _client.settings.searches.wishlist = []
     _persist()
@@ -214,9 +248,9 @@ def _clear_impl() -> None:
 def remove(query: str) -> None:
     """Retrait d'un item (thread-safe, appelable depuis tkinter)."""
     if _loop and _loop.is_running():
-        _loop.call_soon_threadsafe(_remove_impl, query)
+        _loop.call_soon_threadsafe(remove_now, query)
     else:
-        _remove_impl(query)
+        remove_now(query)
 
 
 def clear() -> None:
@@ -271,7 +305,7 @@ async def _collect_then_download(item: WishItem) -> None:
         if existing:
             history.log(_cfg, item, "deja_present", local_path=existing,
                         verification="fichier deja present")
-            _finish(item)
+            _finish(item, existing)
             return
 
         ordered = sorted(item.candidates, key=lambda c: c.score, reverse=True)
@@ -284,7 +318,7 @@ async def _collect_then_download(item: WishItem) -> None:
             meta = read_metadata(file_path)
             history.log(_cfg, item, "wishlist_trouve", candidate=candidate, meta=meta,
                         local_path=file_path, verification="OK")
-            _finish(item)
+            _finish(item, file_path)
             _notify_tray(f"{item.artist} - {item.title} trouvé via wishlist")
             return
 
@@ -296,7 +330,8 @@ async def _collect_then_download(item: WishItem) -> None:
         item.collecting = False
 
 
-def _finish(item: WishItem) -> None:
+def _finish(item: WishItem, file_path=None) -> None:
     """Marque l'item satisfait et le retire (anti BUG-006)."""
     item.done = True
     _remove_impl(item.query)
+    _resolve_jobs(item.query, ok=True, file_path=file_path)

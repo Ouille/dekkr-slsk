@@ -39,7 +39,7 @@ async def _cleanup_failed(client, transfer) -> None:
             pass
 
 
-async def download(client, candidate: SearchCandidate) -> str:
+async def download(client, candidate: SearchCandidate, on_transfer=None) -> str:
     """
     Lance le téléchargement de `candidate` via le client aioslsk.
     Le dossier de destination est celui configuré dans settings.shares.download.
@@ -51,6 +51,12 @@ async def download(client, candidate: SearchCandidate) -> str:
         candidate.username,
         candidate.remote_path,
     )
+    if on_transfer is not None:
+        # SPEC-SLSK-007 D7 : le job lit bytes_transfered / filesize pour la progression.
+        try:
+            on_transfer(transfer)
+        except Exception:
+            pass
 
     elapsed = 0.0
     while not transfer.is_finalized():
